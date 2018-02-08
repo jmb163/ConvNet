@@ -167,7 +167,7 @@ def model(checkpoint=False):
 
         maxIndices = tf.argmax(finalOutput, axis=1)
         predictions = tf.one_hot(maxIndices, depth=10, on_value=1, off_value=0, axis=1, dtype=tf.int32)
-        batchCorrect = tf.equal(tf.argmax(tf.cast(labels, dtype=tf.int32), axis=2), tf.argmax(predictions, axis=1))
+        batchCorrect = tf.equal(tf.argmax(tf.cast(tf.squeeze(labels), dtype=tf.int32), axis=1), tf.argmax(predictions, axis=1))
         batchAccuracy = tf.reduce_mean(tf.cast(batchCorrect, dtype=tf.float32))
 
         runningAccuracy, accuracyUpdate = tf.metrics.accuracy(tf.argmax(tf.cast(labels, dtype=tf.int32), axis=2), tf.argmax(predictions, axis=1))
@@ -194,8 +194,17 @@ def partitionSets(n, sets):
     trainingSet = sets['training']
     assert n < len(trainingSet)
     partitions = [[]]*5
-    for i in range(0, len(trainingSet)):
-        partitions[i%n].append(trainingSet[i])
+    pSize = 60000//n
+    for i in range(0, n):
+        if i == 0:
+            partitions[i] = trainingSet[0:pSize]
+        elif i == (n - 1):
+            partitions[i] = trainingSet[(i*pSize):]
+        else:
+            partitions[i] = trainingSet[(i*pSize):((i+1)*pSize)]
+    # for i in range(0, len(trainingSet)):
+    #     part = i%n
+    #     partitions[part].append(trainingSet[i])
     return partitions
 
 def createFeedDict(partitions, validationPartition, ops, batchSize, n, shuffle=False, runningCounts=None):
@@ -206,7 +215,7 @@ def createFeedDict(partitions, validationPartition, ops, batchSize, n, shuffle=F
             random.shuffle(p)
     for i in range(0, n):
         if i != validationPartition:
-            activePartitions.append(partitions[i][:])
+            activePartitions.append(partitions[i])
     batchSet = []
     counts = [0]*(n-1)
     if runningCounts != None:
@@ -214,8 +223,10 @@ def createFeedDict(partitions, validationPartition, ops, batchSize, n, shuffle=F
     num_sampled = sum(counts)
     partition_entries = sum([len(x) for x in activePartitions])
     diff = partition_entries-num_sampled
-    if (diff) < batchSize:
+    print("Diff is {}".format(diff))
+    if (diff) <= batchSize:
         batchSize = diff
+        print("Epoch Completed")
         end=True
         ##make sure not to grab more data than is there
     for i in range(0, batchSize):
@@ -255,6 +266,15 @@ def testDict(fullset, ops):
     fdict = {ops['inputs']: images, ops['labels']: labels}
     return fdict
 
+def getPercentage(boolArr):
+    fiter = np.array(boolArr).flat
+    total = np.size(boolArr)
+    count = 0
+    for item in fiter:
+        if (item):
+            count += 1
+    return count / total
+
 '''
 model should execute an epoch, compute the accuracy of the validation partition,
 and if the validation error goes up, the network stops training
@@ -269,6 +289,10 @@ if(len(sys.argv)) != 1:
 with tf.Session(config=config, graph=graph) as sess:
     fullset = createSet()
     partitions = partitionSets(5, fullset)
+    o = 0
+    for i in partitions:
+        print("partition {} has {} entries".format(o, len(partitions[o])))
+        o+=1
     coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
     saver = tf.train.Saver()
@@ -281,9 +305,12 @@ with tf.Session(config=config, graph=graph) as sess:
         print("Restoring old model...")
 
     def handler(signum, frame):
-        print("\nmodel saving before sigkill {}".format(signum))
+        print("\n")
+        print("******"*5)
+        print("model saving before sigkill {}".format(signum))
         saver.save(sess, save_path=savePath)
         print("Have a nice day!")
+        print("******"*5)
         exit(0)
 
 
@@ -302,7 +329,7 @@ with tf.Session(config=config, graph=graph) as sess:
             num_processed = sum(counts)
             first = False
             oplist = [
-                ops['batchAccuracy'],
+                ops['batchCorrect'],
                 ops['train'],
                 ops['accuracyUpdate'],
                 ops['predictions'],
@@ -311,9 +338,10 @@ with tf.Session(config=config, graph=graph) as sess:
                 ops['debug']
             ]
             batchAcc, _g, runningAcc, predictions, labels, out, debug = sess.run(oplist, feed_dict=fdict)
-            # print("Batch Accuracy is at {}%".format(batchAcc))
-            print("Running Accuracy is {}%".format(runningAcc))
-            print("processed: {}/60000 ({}%)".format(num_processed, num_processed/60000))
+            print("Batch Accuracy is at {}%".format(getPercentage(batchAcc)*100))
+            # print("Batch Correct: {}".format(batchAcc))
+            print("Running Accuracy is {}%".format(runningAcc*100))
+            print("processed: {}/60000 ({}%)".format(num_processed, (num_processed/60000)*100))
             # print("debug: {}".format(debug))
             # print("Softmax outputs: {}".format(out))
             print("Predictions are: {}".format(predictions.argmax(axis=1)))
@@ -323,7 +351,9 @@ with tf.Session(config=config, graph=graph) as sess:
                 break
         # now perform the validation step
         vfdict = validationDict(partitions, partitionIndicator, ops)
-        vbatchAcc = sess.run([ops['batchAccuracy']], feed_dict=vfdict)
+        vbatchAcc = sess.run([ops['batchCorrect']], feed_dict=vfdict)
+        vbatchAcc = getPercentage(vbatchAcc)
+        print("Validation Accuracy at {}%".format(getPercentage(vbatchAcc)*100))
         if vbatchAcc < validationAccuracy:
             print("Training will now stop")
             saver.save(sess, save_path=savePath)
