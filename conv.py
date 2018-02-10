@@ -29,9 +29,9 @@ kernelSize3 = 1
 kernelSize4 = 1
 
 num_channels = 1
-learningRate = 0.01
+learningRate = 0.001
 nFold = 5 ##N-Fold Cross-Validation
-batchSize = 32
+batchSize = 256
 
 config = tf.ConfigProto(
         device_count = {'GPU': 0}
@@ -120,50 +120,63 @@ def model(checkpoint=False):
         inputs = tf.placeholder(dtype=tf.float32, shape=(None, 28, 28, num_channels), name='inputs')
         labels = tf.placeholder(dtype=tf.float32, shape=(None, 1, 10), name='labels')
 
-        filters1 = tf.Variable(tf.random_normal((kernelSize1, kernelSize1, 1, numFilters1), stddev=0.1))
+        # passFilter = tf.Variable(tf.random_normal((7, 7, 1, 1), stddev=0.4))
+        # zNorm = tf.nn.convolution(inputs, passFilter, padding='SAME', data_format='NHWC')
+        # vNorm = tf.subtract(inputs, zNorm)
+        # vSquared = tf.square(vNorm)
+        # surpressionFilter = tf.Variable(tf.random_normal((9, 9, 1, 1), stddev=0.08))
+        # EvSquared = tf.nn.convolution(vSquared, surpressionFilter, padding='SAME', data_format='NHWC')
+        # sigma = tf.constant(1.0)
+        # beta = tf.constant(0.001)
+        # zNew = tf.div(vNorm,tf.sqrt(tf.add(sigma, tf.multiply(EvSquared,beta))))
+        # zRel = tf.nn.relu(zNew)
+
+        filters1 = tf.Variable(tf.random_normal((kernelSize1, kernelSize1, 1, numFilters1), stddev=0.08))
         conv1 = tf.nn.convolution(inputs, filters1, padding='SAME', data_format='NHWC')
         relconv1 = tf.nn.relu(conv1)
         pool1 = tf.nn.pool(relconv1, window_shape=[2, 2], pooling_type='MAX', padding='VALID', strides=[2, 2],
                            data_format='NHWC')
 
-        filters2 = tf.Variable(tf.random_normal((kernelSize2, kernelSize2, numFilters1, numFilters2), stddev=0.1))
+
+        filters2 = tf.Variable(tf.random_normal((kernelSize2, kernelSize2, numFilters1, numFilters2), stddev=0.08))
         conv2 = tf.nn.convolution(pool1, filters2, padding='SAME', data_format='NHWC')
         relconv2 = tf.nn.relu(conv2)
         pool2 = tf.nn.pool(relconv2, window_shape=[2, 2], pooling_type='MAX', padding='VALID', strides=[2, 2],
                            data_format='NHWC')
 
-        filters3 = tf.Variable(tf.random_normal((kernelSize3, kernelSize3, numFilters2, numFilters3), stddev=0.1))
+        filters3 = tf.Variable(tf.random_normal((kernelSize3, kernelSize3, numFilters2, numFilters3), stddev=0.08))
         conv3 = tf.nn.convolution(pool2, filters3, padding='SAME', data_format='NHWC')
         relconv3 = tf.nn.relu(conv3)
 
-        filters4 = tf.Variable(tf.random_normal((kernelSize4, kernelSize4, numFilters3, numFilters4), stddev=0.1))
+        filters4 = tf.Variable(tf.random_normal((kernelSize4, kernelSize4, numFilters3, numFilters4), stddev=0.08))
         conv4 = tf.nn.convolution(relconv3, filters4, padding='SAME', data_format='NHWC')
         relconv4 = tf.nn.relu(conv4)
+
         shape = tf.shape(relconv4)
 
         # denseLayerInputs = tf.reshape(conv4, shape=[1, 392])
-        denseLayerInputs = tf.contrib.layers.flatten(relconv4)
-        denseWeights1 = tf.Variable(tf.random_normal((784, 50), stddev=0.1))
-        denseBias1 = tf.Variable(tf.random_normal((1, 50), stddev=0.1))
+        denseLayerInputs = tf.contrib.layers.flatten(conv4)
+        denseWeights1 = tf.Variable(tf.random_normal((784, 50), stddev=0.08))
+        denseBias1 = tf.Variable(tf.random_normal((1, 50), stddev=0.08))
         hiddenActivation1 = tf.nn.relu(tf.add(tf.matmul(denseLayerInputs, denseWeights1), denseBias1))
 
-        denseWeights2 = tf.Variable(tf.random_normal((50, 20), stddev=0.1))
+        denseWeights2 = tf.Variable(tf.random_normal((50, 20), stddev=0.08))
         denseBias2 = tf.Variable(tf.random_normal((1, 20)))
         hiddenActivation2 = tf.nn.relu(tf.add(tf.matmul(hiddenActivation1, denseWeights2), denseBias2))
 
-        denseWeights3 = tf.Variable(tf.random_normal((20, 10), stddev=0.1))
-        denseBias3 = tf.Variable(tf.random_normal((1, 10), stddev=0.1))
+        denseWeights3 = tf.Variable(tf.random_normal((20, 10), stddev=0.08))
+        denseBias3 = tf.Variable(tf.random_normal((1, 10), stddev=0.08))
         hiddenActivation3 = tf.nn.relu(tf.add(tf.matmul(hiddenActivation2, denseWeights3), denseBias3))
 
-        denseWeights4 = tf.Variable(tf.random_normal((10, 10), stddev=0.1))
-        denseBias4 = tf.Variable(tf.random_normal((1, 10), stddev=0.1))
+        denseWeights4 = tf.Variable(tf.random_normal((10, 10), stddev=0.08))
+        denseBias4 = tf.Variable(tf.random_normal((1, 10), stddev=0.08))
         hiddenActivation4 = tf.nn.relu(tf.add(tf.matmul(hiddenActivation3, denseWeights4), denseBias4))
 
         output = tf.nn.softmax(hiddenActivation4)
 
         finalOutput = tf.squeeze(output)
         loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(labels, finalOutput))
-        train = tf.train.GradientDescentOptimizer(learning_rate=learningRate).minimize(loss)
+        train = tf.train.GradientDescentOptimizer(learning_rate=learningRate, ).minimize(loss)
 
         maxIndices = tf.argmax(finalOutput, axis=1)
         predictions = tf.one_hot(maxIndices, depth=10, on_value=1, off_value=0, axis=1, dtype=tf.int32)
@@ -174,7 +187,7 @@ def model(checkpoint=False):
         init = tf.global_variables_initializer()
         linit = tf.local_variables_initializer()
 
-    operations = {'debug':shape,
+    operations = {'debug':zNew,
                   'init':init,
                   'inputs':inputs,
                   'labels':labels,
@@ -309,11 +322,11 @@ with tf.Session(config=config, graph=graph) as sess:
 
     def handler(signum, frame):
         print("\n")
-        print("******"*5)
+        print("******"*8)
         print("model saving before sigkill {}".format(signum))
         saver.save(sess, save_path=savePath)
         print("Have a nice day!")
-        print("******"*5)
+        print("******"*8)
         exit(0)
 
 
@@ -340,28 +353,54 @@ with tf.Session(config=config, graph=graph) as sess:
                 ops['output'],
                 ops['debug']
             ]
-            batchAcc, _g, runningAcc, predictions, labels, out, debug = sess.run(oplist, feed_dict=fdict)
+            reducedOps = [
+                ops['batchCorrect'],
+                ops['accuracyUpdate'],
+                ops['train'],
+                ops['predictions'],
+                ops['labels']
+            ]
+
+            # batchAcc, _g, runningAcc, predictions, labels, out, debug = sess.run(oplist, feed_dict=fdict)
+
+            batchAcc, runningAcc, _g, predictions, labels = sess.run(reducedOps, feed_dict=fdict)
+
             print("Batch Accuracy is at {}%".format(getPercentage(batchAcc)*100))
             # print("Batch Correct: {}".format(batchAcc))
-            print("Running Accuracy is {}%".format(runningAcc*100))
+            print("Running Accuracy is  {}%".format(runningAcc*100))
             print("processed: {}/60000 ({}%)".format(num_processed, (num_processed/60000)*100))
             # print("debug: {}".format(debug))
             # print("Softmax outputs: {}".format(out))
-            print("Predictions are: {}".format(predictions.argmax(axis=1)))
+            print("Predictions are: {}".format(predictions.argmax(axis=1)[0:10]))
             labels = labels.reshape((labels.shape[0], 10))
-            print("Labels are:      {}".format(labels.argmax(axis=1)))
+            print("Labels are:      {}".format(labels.argmax(axis=1)[0:10]))
+
+            # newPicture = np.squeeze(newPicture)
+            # newOriginal = np.squeeze(original)
+            # image = newPicture[0, :, :]
+            # origImage = newOriginal[0, :, :]
+            # plt.set_cmap('Greys')
+            #
+            # plt.imshow(origImage)
+            # plt.show()
+            # input()
+            # plt.imshow(image)
+            # plt.show()
+            # input()
+            # exit()
+
             if end:
                 break
         # now perform the validation step
         vfdict = validationDict(partitions, partitionIndicator, ops)
         vbatchAcc, vbatchPredictions, vbatchLabels = sess.run([ops['batchCorrect'], ops['predictions'], ops['labels']], feed_dict=vfdict)
         vbatchAcc = getPercentage(vbatchAcc)
-        print("**********"*8)
-        print("**********"*8)
+        print("*********"*8)
+        print("*********"*8)
         print("Validation Accuracy at {}%".format(vbatchAcc*100))
         print("With validation partition {}".format(partitionIndicator))
-        print("**********"*8)
-        print("**********"*8)
+        print("*********"*8)
+        print("*********"*8)
 
         # print("Predictions are: {}".format(vbatchPredictions.argmax(axis=1)))
         # labels = labels.reshape((labels.shape[0], 10))
@@ -373,7 +412,7 @@ with tf.Session(config=config, graph=graph) as sess:
             coord.should_stop()
             tdict = testDict(fullset, ops)
             testAccuracy = sess.run(ops['batchAccuracy'], feed_dict=tdict)
-            print("Testing accuracy is {}".format(testAccuracy))
+            print("Testing accuracy is {}%".format(testAccuracy*100))
             coord.should_stop()
             break
         else:
