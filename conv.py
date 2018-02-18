@@ -19,8 +19,8 @@ testImages = datafiles[0]
 testLabels = datafiles[1]
 
 numFilters1 = 80
-numFilters2 = 50
-numFilters3 = 25
+numFilters2 = 60
+numFilters3 = 40
 numFilters4 = 16
 
 kernelSize1 = 5
@@ -29,15 +29,18 @@ kernelSize3 = 1
 kernelSize4 = 1
 
 num_channels = 1
-learningRate = 0.001
+learningRate = 0.1
 nFold = 5 ##N-Fold Cross-Validation
-batchSize = 256
+batchSize = 512
+scaleFactor = 0.0
+tolerance = 1 #this variable represents the number of times the validation accuracy
+#can decrease before training stops
 
 config = tf.ConfigProto(
         device_count = {'GPU': 0}
     )
 
-savePath = '/Users/Jon/Documents/Workspace/Machine_Learning/research/params/conv.ckpt'
+savePath = '/Users/Jon/Documents/Workspace/Machine_Learning/research/parameters/conv_py_params/current_parameters/conv.ckpt'
 
 '''
 [offset] [type]          [value]          [description]
@@ -120,22 +123,23 @@ def model(checkpoint=False):
         inputs = tf.placeholder(dtype=tf.float32, shape=(None, 28, 28, num_channels), name='inputs')
         labels = tf.placeholder(dtype=tf.float32, shape=(None, 1, 10), name='labels')
 
-        # passFilter = tf.Variable(tf.random_normal((7, 7, 1, 1), stddev=0.4))
-        # zNorm = tf.nn.convolution(inputs, passFilter, padding='SAME', data_format='NHWC')
-        # vNorm = tf.subtract(inputs, zNorm)
-        # vSquared = tf.square(vNorm)
-        # surpressionFilter = tf.Variable(tf.random_normal((9, 9, 1, 1), stddev=0.08))
-        # EvSquared = tf.nn.convolution(vSquared, surpressionFilter, padding='SAME', data_format='NHWC')
-        # sigma = tf.constant(1.0)
-        # beta = tf.constant(0.001)
-        # zNew = tf.div(vNorm,tf.sqrt(tf.add(sigma, tf.multiply(EvSquared,beta))))
-        # zRel = tf.nn.relu(zNew)
-
         filters1 = tf.Variable(tf.random_normal((kernelSize1, kernelSize1, 1, numFilters1), stddev=0.08))
         conv1 = tf.nn.convolution(inputs, filters1, padding='SAME', data_format='NHWC')
         relconv1 = tf.nn.relu(conv1)
         pool1 = tf.nn.pool(relconv1, window_shape=[2, 2], pooling_type='MAX', padding='VALID', strides=[2, 2],
                            data_format='NHWC')
+
+        # passFilter = tf.Variable(tf.random_normal((7, 7, numFilters1, numFilters1), stddev=0.04))
+        # zNorm = tf.nn.convolution(pool1, passFilter, padding='SAME', data_format='NHWC')
+        # vNorm = tf.subtract(pool1, zNorm, name='vNorm')
+        #
+        # vSquared = tf.square(vNorm)
+        # surpressionFilter = tf.Variable(tf.random_normal((9, 9, numFilters1, numFilters1), stddev=0.08))
+        # EvSquared = tf.nn.convolution(vSquared, surpressionFilter, padding='SAME', data_format='NHWC')
+        # sigma = tf.constant(1.0)
+        # beta = tf.constant(0.001)
+        # zNew = tf.div(vNorm, tf.sqrt(tf.add(sigma, tf.multiply(EvSquared, beta))))
+        # zRel = tf.nn.relu(zNew)
 
 
         filters2 = tf.Variable(tf.random_normal((kernelSize2, kernelSize2, numFilters1, numFilters2), stddev=0.08))
@@ -176,7 +180,14 @@ def model(checkpoint=False):
 
         finalOutput = tf.squeeze(output)
         loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(labels, finalOutput))
-        train = tf.train.GradientDescentOptimizer(learning_rate=learningRate, ).minimize(loss)
+        l1_regularizer = tf.contrib.layers.l1_regularizer(
+            scale=scaleFactor, scope=None
+        )
+        weights = tf.trainable_variables()  # all vars of your graph
+        regularization_penalty = tf.contrib.layers.apply_regularization(l1_regularizer, weights)
+
+        cost = loss + regularization_penalty
+        train = tf.train.GradientDescentOptimizer(learning_rate=learningRate, ).minimize(cost)
 
         maxIndices = tf.argmax(finalOutput, axis=1)
         predictions = tf.one_hot(maxIndices, depth=10, on_value=1, off_value=0, axis=1, dtype=tf.int32)
@@ -187,7 +198,7 @@ def model(checkpoint=False):
         init = tf.global_variables_initializer()
         linit = tf.local_variables_initializer()
 
-    operations = {'debug':zNew,
+    operations = {'debug':shape,
                   'init':init,
                   'inputs':inputs,
                   'labels':labels,
@@ -334,6 +345,8 @@ with tf.Session(config=config, graph=graph) as sess:
     # make it such that training can be stopped at any time
     # handler is defined here so it can use the saver
 
+    epochFail = 0
+
     while not coord.should_stop():
         counts = [0] * (nFold - 1)
         first = True
@@ -371,9 +384,11 @@ with tf.Session(config=config, graph=graph) as sess:
             print("processed: {}/60000 ({}%)".format(num_processed, (num_processed/60000)*100))
             # print("debug: {}".format(debug))
             # print("Softmax outputs: {}".format(out))
-            print("Predictions are: {}".format(predictions.argmax(axis=1)[0:10]))
+            print("Predictions are: {}".format(predictions.argmax(axis=1)[0:32]))
             labels = labels.reshape((labels.shape[0], 10))
-            print("Labels are:      {}".format(labels.argmax(axis=1)[0:10]))
+            print("Labels are:      {}".format(labels.argmax(axis=1)[0:32]))
+            # print("shape is:      {}".format(labels))
+
 
             # newPicture = np.squeeze(newPicture)
             # newOriginal = np.squeeze(original)
@@ -407,15 +422,20 @@ with tf.Session(config=config, graph=graph) as sess:
         # print("Labels are:      {}".format(np.squeeze(vbatchLabels).argmax(axis=1)))
 
         if vbatchAcc <= validationAccuracy:
-            print("Training will now stop")
-            saver.save(sess, save_path=savePath)
-            coord.should_stop()
-            tdict = testDict(fullset, ops)
-            testAccuracy = sess.run(ops['batchAccuracy'], feed_dict=tdict)
-            print("Testing accuracy is {}%".format(testAccuracy*100))
-            coord.should_stop()
-            break
+            epochFail += 1
+            if(epochFail - 1 == tolerance):
+                print("Training will now stop")
+                saver.save(sess, save_path=savePath)
+                coord.should_stop()
+                tdict = testDict(fullset, ops)
+                testAccuracy = sess.run(ops['batchAccuracy'], feed_dict=tdict)
+                print("Testing accuracy is {}%".format(testAccuracy * 100))
+                coord.should_stop()
+                break
+            else:
+                pass
         else:
+            epochFail = 0
             validationAccuracy = vbatchAcc
         partitionIndicator += 1
         partitionIndicator %= nFold

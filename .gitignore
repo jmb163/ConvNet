@@ -1,4 +1,6 @@
-./params*/
 ./data/*
 ./cextensions/*
-./savedparams/*
+./parameters/*
+./autoencoder.py
+./gan.py
+./save.sh
